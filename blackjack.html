@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>Blackjack</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+        :root{
+            --green:#0b6b3b;
+            --card-bg:#fff;
+            --card-red:#c0392b;
+            --card-black:#2c3e50;
+        }
+        html,body{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial;background:linear-gradient(180deg,#083019 0%,#0b6b3b 60%);color:#ecf0f1}
+        .container{max-width:980px;margin:28px auto;padding:20px;background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.4)}
+        header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+        h1{font-size:20px;margin:0}
+        .board{display:flex;gap:12px;flex-wrap:wrap}
+        .panel{flex:1 1 320px;padding:14px;border-radius:8px;background:rgba(0,0,0,0.15)}
+        .hand-row{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+        .cards{display:flex;gap:8px;align-items:center}
+        .card{
+            width:72px;height:104px;border-radius:8px;display:flex;flex-direction:column;justify-content:space-between;padding:8px;
+            box-shadow:0 6px 14px rgba(0,0,0,0.45);background:var(--card-bg);color:var(--card-black);font-weight:600;
+            transform-origin:center;transition:transform .18s ease;
+        }
+        .card.back{background:linear-gradient(135deg,#2c3e50,#4b6b86);color:white;justify-content:center;align-items:center}
+        .card .top,.card .bottom{font-size:16px}
+        .card .suit{font-size:20px;align-self:flex-end}
+        .controls{display:flex;gap:8px;flex-wrap:wrap}
+        button{background:var(--green);color:#fff;border:0;padding:10px 14px;border-radius:8px;font-weight:700;cursor:pointer}
+        button.secondary{background:#444}
+        button:disabled{opacity:.5;cursor:not-allowed}
+        .status{margin-top:10px;font-weight:700}
+        .info{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+        .value-bubble{background:rgba(255,255,255,0.06);padding:6px 10px;border-radius:999px;font-weight:700}
+        footer{margin-top:12px;font-size:13px;color:rgba(236,240,241,0.7)}
+        small{opacity:.85}
+        @media (max-width:560px){
+            .card{width:56px;height:84px;padding:6px;font-size:12px}
+            .card .suit{font-size:16px}
+        }
+    </style>
+</head>
+<body>
+    <div class="container" role="main" aria-label="Blackjack game">
+        <header>
+            <h1>Blackjack</h1>
+            <div class="info">
+                <div class="value-bubble" id="bank">Rounds: 0</div>
+                <div class="value-bubble" id="wins">Player Wins: 0</div>
+                <div class="value-bubble" id="losses">Dealer Wins: 0</div>
+            </div>
+        </header>
+
+        <div class="board">
+            <section class="panel" aria-labelledby="dealer-heading">
+                <h2 id="dealer-heading" style="margin-top:0">Dealer</h2>
+                <div class="hand-row">
+                    <div class="cards" id="dealer-cards" aria-live="polite"></div>
+                </div>
+                <div class="status" id="dealer-total">Total: —</div>
+            </section>
+
+            <section class="panel" aria-labelledby="player-heading">
+                <h2 id="player-heading" style="margin-top:0">Player</h2>
+                <div class="hand-row">
+                    <div class="cards" id="player-cards" aria-live="polite"></div>
+                </div>
+                <div class="status" id="player-total">Total: —</div>
+
+                <div style="margin-top:12px" class="controls">
+                    <button id="deal-btn">Deal</button>
+                    <button id="hit-btn" class="secondary" disabled>Hit</button>
+                    <button id="stand-btn" class="secondary" disabled>Stand</button>
+                    <button id="reset-btn" class="secondary">Reset Score</button>
+                </div>
+                <div class="status" id="message" aria-live="assertive"></div>
+            </section>
+        </div>
+
+        <footer>
+            <small>Simple single-round Blackjack. Dealer stands on 17+. Aces are 1 or 11. No betting.</small>
+        </footer>
+    </div>
+
+    <script>
+        // GitHub Copilot
+        (function(){
+            const SUITS = ['♠','♥','♦','♣'];
+            const RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+
+            function createDeck(){
+                const deck = [];
+                for(const s of SUITS){
+                    for(const r of RANKS){
+                        deck.push({rank:r,suit:s});
+                    }
+                }
+                return shuffle(deck);
+            }
+
+            function shuffle(array){
+                for(let i=array.length-1;i>0;i--){
+                    const j=Math.floor(Math.random()*(i+1));
+                    [array[i],array[j]]=[array[j],array[i]];
+                }
+                return array;
+            }
+
+            function cardValue(card){
+                if(card.rank === 'A') return 11;
+                if(['J','Q','K'].includes(card.rank)) return 10;
+                return Number(card.rank);
+            }
+
+            function handValue(cards){
+                let sum = 0;
+                let aces = 0;
+                for(const c of cards){
+                    sum += cardValue(c);
+                    if(c.rank === 'A') aces++;
+                }
+                while(sum > 21 && aces > 0){
+                    sum -= 10; // count one ace as 1 instead of 11
+                    aces--;
+                }
+                return sum;
+            }
+
+            function makeCardElement(card, facedown=false){
+                const div = document.createElement('div');
+                div.className = 'card' + (facedown? ' back' : '');
+                if(facedown){
+                    div.textContent = '';
+                    const p = document.createElement('div');
+                    p.style.opacity = '.95';
+                    p.textContent = '🂠';
+                    div.appendChild(p);
+                    return div;
+                }
+                const top = document.createElement('div');
+                top.className = 'top';
+                top.textContent = card.rank;
+                const suit = document.createElement('div');
+                suit.className = 'suit';
+                suit.textContent = card.suit;
+                if(card.suit === '♥' || card.suit === '♦'){
+                    top.style.color = 'var(--card-red)';
+                    suit.style.color = 'var(--card-red)';
+                }
+                const bottom = document.createElement('div');
+                bottom.className = 'bottom';
+                bottom.textContent = card.rank;
+                div.appendChild(top);
+                div.appendChild(suit);
+                div.appendChild(bottom);
+                return div;
+            }
+
+            // UI elements
+            const dealerCardsEl = document.getElementById('dealer-cards');
+            const playerCardsEl = document.getElementById('player-cards');
+            const dealerTotalEl = document.getElementById('dealer-total');
+            const playerTotalEl = document.getElementById('player-total');
+            const messageEl = document.getElementById('message');
+            const dealBtn = document.getElementById('deal-btn');
+            const hitBtn = document.getElementById('hit-btn');
+            const standBtn = document.getElementById('stand-btn');
+            const resetBtn = document.getElementById('reset-btn');
+            const roundsEl = document.getElementById('bank');
+            const winsEl = document.getElementById('wins');
+            const lossEl = document.getElementById('losses');
+
+            let deck = [];
+            let playerHand = [];
+            let dealerHand = [];
+            let dealerHoleFaceDown = true;
+            let rounds = 0, wins = 0, losses = 0;
+
+            function updateScoreUI(){
+                roundsEl.textContent = `Rounds: ${rounds}`;
+                winsEl.textContent = `Player Wins: ${wins}`;
+                lossEl.textContent = `Dealer Wins: ${losses}`;
+            }
+
+            function resetTable(){
+                dealerCardsEl.innerHTML = '';
+                playerCardsEl.innerHTML = '';
+                dealerTotalEl.textContent = 'Total: —';
+                playerTotalEl.textContent = 'Total: —';
+                messageEl.textContent = '';
+            }
+
+            function renderHands(revealDealer=false){
+                dealerCardsEl.innerHTML = '';
+                playerCardsEl.innerHTML = '';
+
+                dealerHand.forEach((c, idx) => {
+                    const facedown = dealerHoleFaceDown && idx === 1 && !revealDealer;
+                    dealerCardsEl.appendChild(makeCardElement(c, facedown));
+                });
+
+                playerHand.forEach(c => playerCardsEl.appendChild(makeCardElement(c)));
+
+                const playerVal = handValue(playerHand);
+                playerTotalEl.textContent = `Total: ${playerVal}`;
+                if(revealDealer || !dealerHoleFaceDown){
+                    dealerTotalEl.textContent = `Total: ${handValue(dealerHand)}`;
+                } else {
+                    const visible = handValue([dealerHand[0]]);
+                    dealerTotalEl.textContent = `Total: ${visible} + ?`;
+                }
+            }
+
+            function endRound(resultText){
+                messageEl.textContent = resultText;
+                dealBtn.disabled = false;
+                hitBtn.disabled = true;
+                standBtn.disabled = true;
+                dealerHoleFaceDown = false;
+                renderHands(true);
+            }
+
+            function checkPlayerBust(){
+                const val = handValue(playerHand);
+                if(val > 21){
+                    losses++;
+                    rounds++;
+                    updateScoreUI();
+                    endRound('Player busted. Dealer wins.');
+                }
+            }
+
+            function dealerPlayThenResolve(){
+                dealerHoleFaceDown = false;
+                renderHands(true);
+                // Dealer hits until 17 or more. Treat soft 17 as stand (typical).
+                while(handValue(dealerHand) < 17){
+                    dealerHand.push(deck.pop());
+                }
+                const dVal = handValue(dealerHand);
+                const pVal = handValue(playerHand);
+
+                let result;
+                if(dVal > 21) {
+                    wins++;
+                    result = `Dealer busted (${dVal}). Player wins!`;
+                } else if(dVal > pVal) {
+                    losses++;
+                    result = `Dealer ${dVal} vs Player ${pVal}. Dealer wins.`;
+                } else if(dVal < pVal) {
+                    wins++;
+                    result = `Player ${pVal} vs Dealer ${dVal}. Player wins!`;
+                } else {
+                    result = `Push (tie) at ${pVal}.`;
+                }
+                rounds++;
+                updateScoreUI();
+                endRound(result);
+            }
+
+            // Event handlers
+            dealBtn.addEventListener('click', ()=>{
+                deck = createDeck();
+                playerHand = [];
+                dealerHand = [];
+                dealerHoleFaceDown = true;
+                resetTable();
+                // initial deal
+                playerHand.push(deck.pop());
+                dealerHand.push(deck.pop());
+                playerHand.push(deck.pop());
+                dealerHand.push(deck.pop());
+                renderHands();
+                messageEl.textContent = '';
+                // check for immediate blackjack (natural)
+                const pVal = handValue(playerHand);
+                const dVal = handValue([dealerHand[0]]); // don't reveal hole
+                if(pVal === 21){
+                    // reveal dealer and check
+                    dealerHoleFaceDown = false;
+                    renderHands(true);
+                    const dealerValFull = handValue(dealerHand);
+                    if(dealerValFull === 21){
+                        rounds++;
+                        updateScoreUI();
+                        endRound('Both have Blackjack: Push.');
+                    } else {
+                        wins++;
+                        rounds++;
+                        updateScoreUI();
+                        endRound('Blackjack! Player wins!');
+                    }
+                } else {
+                    dealBtn.disabled = true;
+                    hitBtn.disabled = false;
+                    standBtn.disabled = false;
+                }
+            });
+
+            hitBtn.addEventListener('click', ()=>{
+                playerHand.push(deck.pop());
+                renderHands();
+                checkPlayerBust();
+            });
+
+            standBtn.addEventListener('click', ()=>{
+                hitBtn.disabled = true;
+                standBtn.disabled = true;
+                dealerPlayThenResolve();
+            });
+
+            resetBtn.addEventListener('click', ()=>{
+                rounds = wins = losses = 0;
+                updateScoreUI();
+                resetTable();
+                dealBtn.disabled = false;
+                hitBtn.disabled = true;
+                standBtn.disabled = true;
+            });
+
+            // Initialize UI
+            updateScoreUI();
+            resetTable();
+
+            // Keyboard shortcuts
+            window.addEventListener('keydown', (e)=>{
+                if(e.code === 'Space'){ e.preventDefault(); if(!dealBtn.disabled) dealBtn.click(); }
+                if(e.key.toLowerCase() === 'h' && !hitBtn.disabled) hitBtn.click();
+                if(e.key.toLowerCase() === 's' && !standBtn.disabled) standBtn.click();
+            });
+
+        })();
+    </script>
+</body>
+</html></div>

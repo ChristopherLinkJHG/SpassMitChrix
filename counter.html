@@ -1,0 +1,35 @@
+<html>
+    <head>
+        <title>Hallo, Reisender</title>
+    </head>
+    <body>
+        <p>Hallo, Reisender, drücke den folgenden Knopf für Gold!</p>
+        <button id="counter">Klick mich!</button>
+        <div id="gold"></div>
+        <input id="pi_input" type="range" min="0" max="3.14" step="any" />
+    <p>Value: <output id="value"></output></p>
+    </body>
+    <script>
+        const button = document.getElementById("counter");
+        const goldDisplay = document.getElementById("gold");
+        const value = document.querySelector("#value");
+        const input = document.querySelector("#pi_input");
+        value.textContent = input.value;
+        input.addEventListener("input", (event) => {
+             value.textContent = event.target.value;
+        });
+        let count = 0;
+        button.addEventListener("click", () => {
+            count + mengeInput.value;
+            button.textContent = `Klick mich!`;
+            goldDisplay.textContent = `Du hast ${count} Gold!`;
+        });
+    </script>
+    <style>
+        #counter {
+            color: blue;
+            background-color: red;
+            border-radius: 25px;
+        }
+    </style>
+</html>
