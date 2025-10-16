@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="de">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Spiele Chrix - Home</title>
+        <style>
+            :root{--bg:#87ceeb;--ground:#DEB887;--pipe:#2E8B57;--text:#fff}
+            html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial}
+            canvas{display:block;margin:0 auto;background:linear-gradient(var(--bg),#b3e6ff)}
+            .overlay{
+                position:fixed;left:0;top:0;right:0;bottom:0;display:flex;
+                align-items:center;justify-content:center;pointer-events:none;
+                color:var(--text);text-shadow:0 2px 4px rgba(0,0,0,.4);font-weight:700}
+            .panel{background:rgba(0,0,0,.35);padding:18px 26px;border-radius:10px;pointer-events:auto}
+            .hint{font-weight:600;font-size:14px;opacity:.95}
+            .score{position:fixed;left:12px;top:12px;color:#222;background:#fff8;padding:8px 10px;border-radius:8px;font-weight:700}
+        </style>
+        <body>
+            <a href ="flappy.html">Flappy Bird</a>
+            <a href ="snake.html">Snake</a>
+            <a href ='counter.html'>Counter</a>
+            <a href = "blackjack.html">Blackjack</a>
+        </body>
+</html>
