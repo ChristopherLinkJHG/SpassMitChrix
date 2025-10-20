@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pacman Motion</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: black;
+        }
+        #pacman {
+            width: 50px;
+            height: 50px;
+            background-color: yellow;
+            border-radius: 50%;
+            position: absolute;
+            transition: transform 0.1s;
+        }
+    </style>
+</head>
+<body>
+    <div id="pacman"></div>
+    <script>
+        const pacman = document.getElementById('pacman');
+        let x = window.innerWidth / 2;
+        let y = window.innerHeight / 2;
+
+        pacman.style.transform = `translate(${x}px, ${y}px)`;
+
+        window.addEventListener('deviceorientation', (event) => {
+            const gamma = event.gamma; // Left to right tilt in degrees
+            const beta = event.beta; // Front to back tilt in degrees
+
+            // Update Pacman's position based on device orientation
+            x += gamma * 2; // Adjust sensitivity as needed
+            y -= beta * 2; // Adjust sensitivity as needed
+
+            // Keep Pacman within the window bounds
+            x = Math.max(0, Math.min(window.innerWidth - 50, x));
+            y = Math.max(0, Math.min(window.innerHeight - 50, y));
+
+            pacman.style.transform = `translate(${x}px, ${y}px)`;
+        });
+    </script>
+</body>
+</html>
