@@ -1,3 +1,4 @@
+<!-- ...existing code... -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -23,6 +24,12 @@
     <div class="panel" id="panel">
         <div style="font-size:22px;margin-bottom:6px">Flappy Bird — Click / Space to flap</div>
         <div class="hint" id="hint">Click or press Space to start</div>
+
+        <!-- QR container (hidden until game over) -->
+        <div id="qrContainer" style="margin-top:12px;display:none;text-align:center">
+            <div style="font-size:12px;margin-bottom:6px;color:#fff8">Scan to save/share score</div>
+            <img id="qr" alt="QR code" style="width:160px;height:160px;border-radius:8px;background:#fff;padding:6px" />
+        </div>
     </div>
 </div>
 <div class="score" id="score" style="display:none">0</div>
@@ -35,6 +42,8 @@
     const panel = document.getElementById('panel');
     const hint = document.getElementById('hint');
     const scoreEl = document.getElementById('score');
+    const qrContainer = document.getElementById('qrContainer');
+    const qrImg = document.getElementById('qr');
 
     let W = 480, H = 640;
     const DPR = Math.min(window.devicePixelRatio || 1, 2);
@@ -71,6 +80,19 @@
     let score = 0;
     let best = Number(localStorage.getItem('flappy_best')||0);
 
+    // Player name for QR (persisted)
+    let playerName = localStorage.getItem('flappy_player') || '';
+
+    function askName() {
+        // ask once if no stored name
+        if (!playerName) {
+            const n = prompt('Enter your name for the QR code (optional):', '');
+            if (n !== null) playerName = n.trim();
+            if (!playerName) playerName = '';
+            localStorage.setItem('flappy_player', playerName);
+        }
+    }
+
     function reset() {
         bird = {x: BIRD_X, y: H/2, vy: 0};
         pipes = [];
@@ -83,6 +105,8 @@
         hint.textContent = 'Click or press Space to start';
         panel.querySelector('div').textContent = 'Flappy Bird — Click / Space to flap';
         lastTime = 0;
+        // hide QR on reset
+        qrContainer.style.display = 'none';
     }
 
     function start() {
@@ -160,6 +184,15 @@
         overlay.style.display = 'flex';
         panel.querySelector('div').textContent = 'Game Over — Score: ' + score + '  Best: ' + best;
         hint.textContent = 'Click or press Space to retry';
+
+        // ensure we asked name before generating QR
+        askName();
+
+        // build payload and QR URL (JSON with name, score, game)
+        const payload = JSON.stringify({name: playerName, score: score, game: 'flappy'});
+        const qrUrl = 'https://chart.googleapis.com/chart?chs=300x300&cht=qr&chl=' + encodeURIComponent(payload) + '&choe=UTF-8';
+        qrImg.src = qrUrl;
+        qrContainer.style.display = 'block';
     }
 
     function draw() {
@@ -247,6 +280,7 @@
     window.addEventListener('touchstart', e => { e.preventDefault(); flap(); }, {passive:false});
 
     // init
+    askName(); // ask before play
     reset();
     // show best on start
     panel.querySelector('div').textContent = 'Flappy Bird — Best: ' + best;
@@ -260,3 +294,4 @@
 </script>
 </body>
 </html>
+<!-- ...existing code... -->
