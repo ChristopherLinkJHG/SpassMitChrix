@@ -20,7 +20,7 @@ canvas{width:100%;height:100%;display:block;}
         <div id="score">Score: 0</div>
         <div id="best">Best: 0</div>
     </div>
-    <button id="motionBtn">Enable Motion</button>
+    <button id="motionBtn">Motion Off</button>
     <canvas id="gameCanvas"></canvas>
 </div>
 <script>
@@ -61,6 +61,7 @@ let running = true;
 let accelX = 0;
 let useMotion = false;
 let lastGenY = 0;
+let motionHandler = null; // NEW
 
 function reset() {
     platforms = [];
@@ -78,19 +79,12 @@ function reset() {
 function rand(min,max){return Math.random()*(max-min)+min;}
 
 function chooseType(){
-    // Increase variety with score
     const s = score;
     let types = ['normal'];
     if(s > 150) types.push('moving');
     if(s > 300) types.push('bounce');
     if(s > 500) types.push('disappear');
-    // Weighted probabilities
-    const weights = {
-        normal: 1,
-        moving: 0.35,
-        bounce: 0.25,
-        disappear: 0.18
-    };
+    const weights = { normal:1, moving:0.35, bounce:0.25, disappear:0.18 };
     let pool = [];
     types.forEach(t => {
         for(let i=0;i<weights[t]*10;i++) pool.push(t);
@@ -106,9 +100,9 @@ function generatePlatform(y){
     if(type==='moving'){
         p.vx = rand(-1.2,1.2);
     } else if(type==='bounce'){
-        p.bounceBoost = -20; // stronger jump
+        p.bounceBoost = -20;
     } else if(type==='disappear'){
-        p.life = 40; // shorter fade life after used
+        p.life = 40;
     }
     platforms.push(p);
 }
@@ -172,7 +166,6 @@ function updatePlayer(){
                 player.y + player.h > p.y &&
                 player.y + player.h < p.y + p.height + player.vy + 4
             ){
-                // Collision
                 if(p.type==='bounce'){
                     player.vy = p.bounceBoost;
                 } else {
@@ -272,7 +265,6 @@ function drawBackground(){
 }
 
 function drawBorders(){
-    // Left & right visual guides
     const stripeW = 12;
     const gradLeft = ctx.createLinearGradient(0,0,stripeW,0);
     gradLeft.addColorStop(0,'rgba(255,255,255,0.25)');
@@ -284,18 +276,13 @@ function drawBorders(){
     ctx.fillRect(0,0,stripeW,H);
     ctx.fillStyle=gradRight;
     ctx.fillRect(W-stripeW,0,stripeW,H);
-    // Caution stripes
     const stripeH = 18;
     ctx.save();
     ctx.globalAlpha=0.30;
     for(let y=(cameraY%stripeH)-stripeH; y < cameraY+H; y+=stripeH){
         const screenY = y - cameraY;
         if(screenY>-stripeH && screenY<H){
-            if(Math.floor(y/stripeH)%2===0){
-                ctx.fillStyle='#ffcc00';
-            } else {
-                ctx.fillStyle='#ff6600';
-            }
+            ctx.fillStyle = (Math.floor(y/stripeH)%2===0)?'#ffcc00':'#ff6600';
             ctx.fillRect(0,screenY,stripeW, stripeH);
             ctx.fillRect(W-stripeW,screenY,stripeW, stripeH);
         }
@@ -313,7 +300,7 @@ function drawGameOver(){
     ctx.font='22px Arial';
     ctx.fillText('Score: '+score+'   Best: '+best, W/2, H/2);
     ctx.font='16px Arial';
-    ctx.fillText('Press Space to Restart', W/2, H/2 + 40);
+    ctx.fillText('Press Space / Click / Tap to Restart', W/2, H/2 + 40); // UPDATED
 }
 
 function loop(){
@@ -338,31 +325,56 @@ const keys = {left:false,right:false};
 addEventListener('keydown', e=>{
     if(e.code==='ArrowLeft'||e.code==='KeyA') keys.left = true;
     if(e.code==='ArrowRight'||e.code==='KeyD') keys.right = true;
-    if(e.code==='Space' && !running){ reset(); }
+    if(!running){ reset(); }
 });
 addEventListener('keyup', e=>{
     if(e.code==='ArrowLeft'||e.code==='KeyA') keys.left = false;
     if(e.code==='ArrowRight'||e.code==='KeyD') keys.right = false;
 });
 
+// Start game on click / touch (pointer) when not running - NEW
+canvas.addEventListener('pointerdown', () => {
+    if(!running) reset();
+});
+
 function enableMotion(){
-    function activate(ev){
+    if(motionHandler) return;
+    motionHandler = function(ev){
         const ax = ev.accelerationIncludingGravity ? ev.accelerationIncludingGravity.x : 0;
         accelX = (-ax) * 0.08;
-    }
-    window.addEventListener('devicemotion', activate);
+    };
+    window.addEventListener('devicemotion', motionHandler);
 }
 
+function disableMotion(){
+    if(motionHandler){
+        window.removeEventListener('devicemotion', motionHandler);
+        motionHandler = null;
+    }
+    accelX = 0;
+}
+
+// Toggle motion on/off - UPDATED
 const motionBtn = document.getElementById('motionBtn');
 motionBtn.addEventListener('click', ()=>{
-    if(typeof DeviceMotionEvent!=='undefined' && typeof DeviceMotionEvent.requestPermission==='function'){
-        DeviceMotionEvent.requestPermission().then(res=>{
-            if(res==='granted'){ useMotion = true; enableMotion(); motionBtn.textContent='Motion On'; }
-        }).catch(()=>{});
+    if(!useMotion){
+        if(typeof DeviceMotionEvent!=='undefined' && typeof DeviceMotionEvent.requestPermission==='function'){
+            DeviceMotionEvent.requestPermission().then(res=>{
+                if(res==='granted'){
+                    useMotion = true;
+                    enableMotion();
+                    motionBtn.textContent='Motion On';
+                }
+            }).catch(()=>{});
+        } else {
+            useMotion = true;
+            enableMotion();
+            motionBtn.textContent='Motion On';
+        }
     } else {
-        useMotion = true;
-        enableMotion();
-        motionBtn.textContent='Motion On';
+        disableMotion();
+        useMotion = false;
+        motionBtn.textContent='Motion Off';
     }
 });
 
