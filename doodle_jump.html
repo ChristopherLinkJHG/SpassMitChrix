@@ -19,6 +19,13 @@ canvas{width:100%;height:100%;display:block;}
     <div id="hud">
         <div id="score">Score: 0</div>
         <div id="best">Best: 0</div>
+        <div id="motionControls" style="margin-top:6px;font-size:13px;">
+            <label style="display:inline-flex;align-items:center;gap:6px;">
+                <input type="checkbox" id="invertMotion"> Invert
+            </label>
+            <button id="calibrateBtn" style="margin-left:8px;padding:4px 8px;font-size:12px;">Calibrate</button>
+            <div id="diag" style="margin-top:6px;font-size:12px;opacity:0.9;line-height:1.2;"></div>
+        </div>
     </div>
     <button id="motionBtn">Motion Off</button>
     <canvas id="gameCanvas"></canvas>
@@ -64,7 +71,11 @@ let accelX = 0;
 let useMotion = false;
 let lastGenY = 0;
 let motionHandler = null;
+let orientationHandler = null;
 let screenAngle = 0; // current screen orientation angle (deg)
+let invertMotion = false;
+let zeroTilt = 0; // calibration offset (degrees)
+let lastOrientationGamma = 0; // latest gamma reading for calibrate
 
 function reset() {
     platforms = [];
@@ -342,6 +353,23 @@ addEventListener('keydown', e=>{
     if(e.code==='ArrowRight'||e.code==='KeyD') keys.right = true;
     if(!running){ reset(); }
 });
+
+// Wire up invert toggle and calibrate button
+const invertEl = document.getElementById('invertMotion');
+if(invertEl){
+    invertEl.addEventListener('change', ()=>{ invertMotion = !!invertEl.checked; });
+}
+const calibBtn = document.getElementById('calibrateBtn');
+if(calibBtn){
+    calibBtn.addEventListener('click', ()=>{
+        // set current gamma as zero reference for orientation-based control
+        zeroTilt = lastOrientationGamma || 0;
+        // tiny feedback via diag
+        const diagEl = document.getElementById('diag');
+        if(diagEl) diagEl.textContent = 'Calibrated at γ=' + zeroTilt.toFixed(2) + '°';
+        setTimeout(()=>{ if(diagEl) diagEl.textContent = ''; }, 1200);
+    });
+}
 addEventListener('keyup', e=>{
     if(e.code==='ArrowLeft'||e.code==='KeyA') keys.left = false;
     if(e.code==='ArrowRight'||e.code==='KeyD') keys.right = false;
@@ -353,59 +381,71 @@ canvas.addEventListener('pointerdown', () => {
 });
 
 function enableMotion(){
-    if(motionHandler) return;
+    if(motionHandler || orientationHandler) return;
 
     // Determine screen orientation angle with sensible fallbacks
     function getScreenAngle(){
-        // screen.orientation.angle is standard, window.orientation is legacy (deg or undefined)
         const so = (screen && screen.orientation && typeof screen.orientation.angle === 'number') ? screen.orientation.angle : null;
         if(so !== null) return ((so % 360) + 360) % 360;
         if(typeof window.orientation === 'number') return ((window.orientation % 360) + 360) % 360;
         return 0;
     }
 
-    // Compute mapped X acceleration in screen coordinates. This rotates the device's
-    // accelerationIncludingGravity vector by the screen orientation so tilting right
-    // always maps to positive X on the screen.
+    // Update diagnostic HUD (if present)
+    const diagEl = document.getElementById('diag');
+    function updateDiag(raw){
+        if(!diagEl) return;
+        const lines = [];
+        if(raw){
+            if('gamma' in raw) lines.push('γ:'+raw.gamma.toFixed(2)+'°');
+            if('beta' in raw) lines.push('β:'+raw.beta.toFixed(2)+'°');
+            if('ax' in raw) lines.push('ax:'+raw.ax.toFixed(3)+' ay:'+raw.ay.toFixed(3));
+            if('mapped' in raw) lines.push('mapped:'+raw.mapped.toFixed(3));
+        }
+        lines.push('angle:'+screenAngle+'°');
+        lines.push('invert:'+ (invertMotion? 'yes':'no'));
+        diagEl.textContent = lines.join('   |   ');
+    }
+
+    // DeviceOrientation (preferred): use gamma (left/right tilt)
+    orientationHandler = function(ev){
+        const gamma = (typeof ev.gamma === 'number') ? ev.gamma : 0;
+        lastOrientationGamma = gamma;
+        const adjusted = (gamma - zeroTilt) * (invertMotion ? -1 : 1);
+        const mapped = Math.sin(adjusted * Math.PI/180);
+        accelX = mapped * 0.08;
+        updateDiag({gamma, beta: ev.beta || 0, ax:0, ay:0, mapped});
+    };
+
+    // DeviceMotion fallback: map accelerationIncludingGravity to screen X using rotation mapping
     function mapAccelToScreenX(ev){
         const g = ev.accelerationIncludingGravity || ev.acceleration || {x:0,y:0,z:0};
         const rawX = g.x || 0;
         const rawY = g.y || 0;
-
-        // Normalize angle to 0/90/180/270 (some platforms give other values, but most are these)
         const a = screenAngle;
         let mapped = 0;
-        // These mappings are chosen so that tilting device to the right increases mapped X
-        // and tilting left decreases it. If you find signs reversed on a specific device,
-        // we could expose an invert toggle later.
-        if(a === 0){
-            mapped = -rawX; // portrait-primary: device X is screen X but sign inverted for natural feel
-        } else if(a === 90){
-            mapped = rawY; // rotated 90deg clockwise: device Y becomes screen X
-        } else if(a === 180){
-            mapped = rawX; // upside down: invert the inversion
-        } else if(a === 270){
-            mapped = -rawY; // rotated 270deg: negative device Y -> screen X
-        } else {
-            // For non-exact angles, apply rotation matrix as fallback
-            const rad = a * Math.PI/180;
-            // rotate vector (rawX, rawY) by -angle to account for device->screen rotation
-            mapped = rawX * Math.cos(rad) + rawY * Math.sin(rad);
-            // flip sign to match our default mapping for angle=0
-            mapped = -mapped;
-        }
+        if(a === 0){ mapped = -rawX; }
+        else if(a === 90){ mapped = rawY; }
+        else if(a === 180){ mapped = rawX; }
+        else if(a === 270){ mapped = -rawY; }
+        else { const rad = a * Math.PI/180; mapped = rawX * Math.cos(rad) + rawY * Math.sin(rad); mapped = -mapped; }
+        if(invertMotion) mapped = -mapped;
         return mapped;
     }
 
     // initialize angle and listen for changes
     screenAngle = getScreenAngle();
-    window.addEventListener('orientationchange', ()=>{ screenAngle = getScreenAngle(); });
+    window.addEventListener('orientationchange', ()=>{ screenAngle = getScreenAngle(); updateDiag(); });
 
+    // devicemotion handler
     motionHandler = function(ev){
         const mapped = mapAccelToScreenX(ev);
-        // scale down to a usable game acceleration value. Keep prior multiplier (0.08) for similar feel.
         accelX = mapped * 0.08;
+        updateDiag({ax: ev.accelerationIncludingGravity? ev.accelerationIncludingGravity.x||0:0, ay: ev.accelerationIncludingGravity? ev.accelerationIncludingGravity.y||0:0, mapped});
     };
+
+    // Attach both handlers; orientation preferred by browsers that provide it
+    window.addEventListener('deviceorientation', orientationHandler);
     window.addEventListener('devicemotion', motionHandler);
 }
 
@@ -414,6 +454,10 @@ function disableMotion(){
         window.removeEventListener('devicemotion', motionHandler);
         motionHandler = null;
     }
+    if(orientationHandler){
+        window.removeEventListener('deviceorientation', orientationHandler);
+        orientationHandler = null;
+    }
     accelX = 0;
 }
 
@@ -421,9 +465,16 @@ function disableMotion(){
 const motionBtn = document.getElementById('motionBtn');
 motionBtn.addEventListener('click', ()=>{
     if(!useMotion){
-        if(typeof DeviceMotionEvent!=='undefined' && typeof DeviceMotionEvent.requestPermission==='function'){
-            DeviceMotionEvent.requestPermission().then(res=>{
-                if(res==='granted'){
+        // On iOS some browsers require permission for DeviceOrientation / DeviceMotion
+        const needOrientPerm = (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function');
+        const needMotionPerm = (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function');
+        if(needOrientPerm || needMotionPerm){
+            const promises = [];
+            if(needOrientPerm) promises.push(DeviceOrientationEvent.requestPermission());
+            if(needMotionPerm) promises.push(DeviceMotionEvent.requestPermission());
+            Promise.all(promises).then(results => {
+                // If at least one permission granted, enable motion handlers
+                if(results.some(r=>r==='granted')){
                     useMotion = true;
                     enableMotion();
                     motionBtn.textContent='Motion On';
