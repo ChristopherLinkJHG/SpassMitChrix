@@ -64,6 +64,7 @@ let accelX = 0;
 let useMotion = false;
 let lastGenY = 0;
 let motionHandler = null;
+let screenAngle = 0; // current screen orientation angle (deg)
 
 function reset() {
     platforms = [];
@@ -353,9 +354,57 @@ canvas.addEventListener('pointerdown', () => {
 
 function enableMotion(){
     if(motionHandler) return;
+
+    // Determine screen orientation angle with sensible fallbacks
+    function getScreenAngle(){
+        // screen.orientation.angle is standard, window.orientation is legacy (deg or undefined)
+        const so = (screen && screen.orientation && typeof screen.orientation.angle === 'number') ? screen.orientation.angle : null;
+        if(so !== null) return ((so % 360) + 360) % 360;
+        if(typeof window.orientation === 'number') return ((window.orientation % 360) + 360) % 360;
+        return 0;
+    }
+
+    // Compute mapped X acceleration in screen coordinates. This rotates the device's
+    // accelerationIncludingGravity vector by the screen orientation so tilting right
+    // always maps to positive X on the screen.
+    function mapAccelToScreenX(ev){
+        const g = ev.accelerationIncludingGravity || ev.acceleration || {x:0,y:0,z:0};
+        const rawX = g.x || 0;
+        const rawY = g.y || 0;
+
+        // Normalize angle to 0/90/180/270 (some platforms give other values, but most are these)
+        const a = screenAngle;
+        let mapped = 0;
+        // These mappings are chosen so that tilting device to the right increases mapped X
+        // and tilting left decreases it. If you find signs reversed on a specific device,
+        // we could expose an invert toggle later.
+        if(a === 0){
+            mapped = -rawX; // portrait-primary: device X is screen X but sign inverted for natural feel
+        } else if(a === 90){
+            mapped = rawY; // rotated 90deg clockwise: device Y becomes screen X
+        } else if(a === 180){
+            mapped = rawX; // upside down: invert the inversion
+        } else if(a === 270){
+            mapped = -rawY; // rotated 270deg: negative device Y -> screen X
+        } else {
+            // For non-exact angles, apply rotation matrix as fallback
+            const rad = a * Math.PI/180;
+            // rotate vector (rawX, rawY) by -angle to account for device->screen rotation
+            mapped = rawX * Math.cos(rad) + rawY * Math.sin(rad);
+            // flip sign to match our default mapping for angle=0
+            mapped = -mapped;
+        }
+        return mapped;
+    }
+
+    // initialize angle and listen for changes
+    screenAngle = getScreenAngle();
+    window.addEventListener('orientationchange', ()=>{ screenAngle = getScreenAngle(); });
+
     motionHandler = function(ev){
-        const ax = ev.accelerationIncludingGravity ? ev.accelerationIncludingGravity.x : 0;
-        accelX = (-ax) * 0.08;
+        const mapped = mapAccelToScreenX(ev);
+        // scale down to a usable game acceleration value. Keep prior multiplier (0.08) for similar feel.
+        accelX = mapped * 0.08;
     };
     window.addEventListener('devicemotion', motionHandler);
 }
