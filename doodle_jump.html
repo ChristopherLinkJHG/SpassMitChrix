@@ -409,6 +409,7 @@ function loop(){
 }
 
 const keys = {left:false,right:false};
+let activePointerId = null; // track active touch/pointer for touch controls
 addEventListener('keydown', e=>{
     if(e.code==='ArrowLeft'||e.code==='KeyA') keys.left = true;
     if(e.code==='ArrowRight'||e.code==='KeyD') keys.right = true;
@@ -436,10 +437,38 @@ addEventListener('keyup', e=>{
     if(e.code==='ArrowRight'||e.code==='KeyD') keys.right = false;
 });
 
-// Start game on click / touch (pointer)
-canvas.addEventListener('pointerdown', () => {
-    if(!running) reset();
+// Touch / pointer controls: touch left/right half to move; tap when game over to restart
+canvas.addEventListener('pointerdown', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    // if game not running, any pointer down restarts
+    if(!running){ reset(); return; }
+
+    // start directional movement depending on half
+    if(x < rect.width/2){ keys.left = true; keys.right = false; }
+    else { keys.right = true; keys.left = false; }
+
+    activePointerId = e.pointerId;
+    try { canvas.setPointerCapture(e.pointerId); } catch(e){ /* ignore */ }
 });
+
+canvas.addEventListener('pointermove', (e) => {
+    if(activePointerId === null || e.pointerId !== activePointerId) return;
+    if(!running) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    if(x < rect.width/2){ keys.left = true; keys.right = false; }
+    else { keys.right = true; keys.left = false; }
+});
+
+function releasePointer(id){
+    if(activePointerId !== id) return;
+    keys.left = false; keys.right = false;
+    activePointerId = null;
+}
+
+canvas.addEventListener('pointerup', (e) => { releasePointer(e.pointerId); try{ canvas.releasePointerCapture(e.pointerId); }catch(e){} });
+canvas.addEventListener('pointercancel', (e) => { releasePointer(e.pointerId); });
 
 function enableMotion(){
     if(motionHandler || orientationHandler) return;
@@ -468,13 +497,16 @@ function enableMotion(){
         diagEl.textContent = lines.join('   |   ');
     }
 
-    // DeviceOrientation (preferred): use gamma (left/right tilt)
+    // Preferred: DeviceOrientation (gamma) — map tilt to accelX (works well on iPad in portrait)
     orientationHandler = function(ev){
         const gamma = (typeof ev.gamma === 'number') ? ev.gamma : 0;
         lastOrientationGamma = gamma;
+        // adjusted tilt (degrees) after calibration
         const adjusted = (gamma - zeroTilt) * (invertMotion ? -1 : 1);
-        const mapped = Math.sin(adjusted * Math.PI/180);
-        accelX = mapped * 0.08;
+        // map degrees (~ -45..45) to -1..1 (use 30° as soft cap)
+        const mapped = Math.max(-1, Math.min(1, adjusted / 30));
+        // tuned multiplier for responsive but stable movement
+        accelX = mapped * 0.12;
         updateDiag({gamma, beta: ev.beta || 0, ax:0, ay:0, mapped});
     };
 
@@ -501,13 +533,14 @@ function enableMotion(){
     // devicemotion handler
     motionHandler = function(ev){
         const mapped = mapAccelToScreenX(ev);
-        accelX = mapped * 0.08;
+        // smaller multiplier for raw acceleration
+        accelX = mapped * 0.06;
         updateDiag({ax: ev.accelerationIncludingGravity? ev.accelerationIncludingGravity.x||0:0, ay: ev.accelerationIncludingGravity? ev.accelerationIncludingGravity.y||0:0, mapped});
     };
 
     // Attach both handlers; orientation preferred by browsers that provide it
-    window.addEventListener('deviceorientation', orientationHandler);
-    window.addEventListener('devicemotion', motionHandler);
+    window.addEventListener('deviceorientation', orientationHandler, {passive:true});
+    window.addEventListener('devicemotion', motionHandler, {passive:true});
 }
 
 function disableMotion(){
@@ -522,30 +555,42 @@ function disableMotion(){
     accelX = 0;
 }
 
-// Toggle motion on/off
+// Toggle motion on/off with proper permission flow on iOS
 const motionBtn = document.getElementById('motionBtn');
-motionBtn.addEventListener('click', ()=>{
-    if(!useMotion){
-        // On iOS some browsers require permission for DeviceOrientation / DeviceMotion
-        const needOrientPerm = (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function');
-        const needMotionPerm = (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function');
-        if(needOrientPerm || needMotionPerm){
-            const promises = [];
-            if(needOrientPerm) promises.push(DeviceOrientationEvent.requestPermission());
-            if(needMotionPerm) promises.push(DeviceMotionEvent.requestPermission());
-            Promise.all(promises).then(results => {
-                // If at least one permission granted, enable motion handlers
-                if(results.some(r=>r==='granted')){
-                    useMotion = true;
-                    enableMotion();
-                    motionBtn.textContent='Motion On';
-                }
-            }).catch(()=>{});
-        } else {
-            useMotion = true;
-            enableMotion();
-            motionBtn.textContent='Motion On';
+async function requestMotionPermission(){
+    // If the permission API is available, request it. Must be called from a user gesture.
+    try{
+        if(typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+            const r = await DeviceOrientationEvent.requestPermission();
+            if(r === 'granted') return true;
         }
+    }catch(e){/* ignore */}
+    try{
+        if(typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function'){
+            const r = await DeviceMotionEvent.requestPermission();
+            if(r === 'granted') return true;
+        }
+    }catch(e){/* ignore */}
+    return false;
+}
+
+motionBtn.addEventListener('click', async ()=>{
+    if(!useMotion){
+        // If the browser requires permission, ask for it. If the API isn't present, just enable.
+        const needPermissionAPI = (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') ||
+                                  (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function');
+        if(needPermissionAPI){
+            const granted = await requestMotionPermission();
+            if(!granted){
+                // Permission denied or unavailable — show a hint in diag if possible
+                const diagEl = document.getElementById('diag');
+                if(diagEl) diagEl.textContent = 'Motion permission denied. Check Safari settings.';
+                return;
+            }
+        }
+        useMotion = true;
+        enableMotion();
+        motionBtn.textContent='Motion On';
     } else {
         disableMotion();
         useMotion = false;
