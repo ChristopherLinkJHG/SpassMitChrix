@@ -111,7 +111,8 @@ let orientationHandler = null;
 let screenAngle = 0; // current screen orientation angle (deg)
 let invertMotion = false;
 let zeroTilt = 0; // calibration offset (degrees)
-let lastOrientationGamma = 0; // latest gamma reading for calibrate
+let lastOrientationGamma = 0; // legacy: last gamma
+let lastOrientationTilt = 0; // latest chosen tilt axis (gamma or beta) for calibrate
 
 function reset() {
     platforms = [];
@@ -424,11 +425,11 @@ if(invertEl){
 const calibBtn = document.getElementById('calibrateBtn');
 if(calibBtn){
     calibBtn.addEventListener('click', ()=>{
-        // set current gamma as zero reference for orientation-based control
-        zeroTilt = lastOrientationGamma || 0;
+        // set current tilt (chosen axis) as zero reference for orientation-based control
+        zeroTilt = lastOrientationTilt || 0;
         // tiny feedback via diag
         const diagEl = document.getElementById('diag');
-        if(diagEl) diagEl.textContent = 'Calibrated at γ=' + zeroTilt.toFixed(2) + '°';
+        if(diagEl) diagEl.textContent = 'Calibrated at tilt=' + zeroTilt.toFixed(2) + '°';
         setTimeout(()=>{ if(diagEl) diagEl.textContent = ''; }, 1200);
     });
 }
@@ -491,6 +492,7 @@ function enableMotion(){
             if('beta' in raw) lines.push('β:'+raw.beta.toFixed(2)+'°');
             if('ax' in raw) lines.push('ax:'+raw.ax.toFixed(3)+' ay:'+raw.ay.toFixed(3));
             if('mapped' in raw) lines.push('mapped:'+raw.mapped.toFixed(3));
+            if('axis' in raw) lines.push('axis:'+raw.axis);
         }
         lines.push('angle:'+screenAngle+'°');
         lines.push('invert:'+ (invertMotion? 'yes':'no'));
@@ -500,14 +502,28 @@ function enableMotion(){
     // Preferred: DeviceOrientation (gamma) — map tilt to accelX (works well on iPad in portrait)
     orientationHandler = function(ev){
         const gamma = (typeof ev.gamma === 'number') ? ev.gamma : 0;
+        const beta = (typeof ev.beta === 'number') ? ev.beta : 0;
         lastOrientationGamma = gamma;
-        // adjusted tilt (degrees) after calibration
-        const adjusted = (gamma - zeroTilt) * (invertMotion ? -1 : 1);
-        // map degrees (~ -45..45) to -1..1 (use 30° as soft cap)
-        const mapped = Math.max(-1, Math.min(1, adjusted / 30));
-        // tuned multiplier for responsive but stable movement
-        accelX = mapped * 0.12;
-        updateDiag({gamma, beta: ev.beta || 0, ax:0, ay:0, mapped});
+
+        // pick the correct tilt axis depending on screen orientation
+        let tilt = 0;
+        let axis = 'gamma';
+        if(screenAngle === 0){ tilt = gamma; axis = 'gamma'; }
+        else if(screenAngle === 180){ tilt = -gamma; axis = 'gamma'; }
+        else if(screenAngle === 90){ tilt = beta; axis = 'beta'; }
+        else if(screenAngle === 270){ tilt = -beta; axis = 'beta'; }
+        else { // fallback: choose the axis with larger movement
+            if(Math.abs(beta) > Math.abs(gamma)){ tilt = beta; axis = 'beta'; } else { tilt = gamma; axis = 'gamma'; }
+        }
+
+        lastOrientationTilt = tilt;
+        // adjusted tilt (degrees) after calibration and invert option
+        const adjusted = (tilt - zeroTilt) * (invertMotion ? -1 : 1);
+        // map degrees to -1..1 using a soft cap (20° gives more sensitivity)
+        const mapped = Math.max(-1, Math.min(1, adjusted / 20));
+        // tuned multiplier for responsive movement on tablets
+        accelX = mapped * 0.18;
+        updateDiag({gamma, beta, axis, mapped});
     };
 
     // DeviceMotion fallback: map accelerationIncludingGravity to screen X using rotation mapping
