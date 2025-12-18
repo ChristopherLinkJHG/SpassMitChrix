@@ -44,10 +44,46 @@ function setSize(){
     canvas.height = rect.height;
     W = canvas.width;
     H = canvas.height;
+    // regenerate stars so they match the new canvas size
+    // defer generation to avoid temporal-dead-zone issues during initial script parse
+    setTimeout(()=>{ if(typeof generateStars === 'function') generateStars(); }, 0);
 }
 let W=0,H=0;
 setSize();
 addEventListener('resize', setSize);
+
+// persistent star field (pulsating)
+let stars = [];
+let lastCameraY = 0;
+let lastPlayerX = 0;
+
+function generateStars(count){
+    // choose density by area; default ~1 star per 9000 px
+    const area = Math.max(1, W*H);
+    // increase density slightly so there are more stars on larger screens
+    const defaultCount = Math.max(90, Math.floor(area/7000));
+    const n = count || defaultCount;
+    stars.length = 0;
+    for(let i=0;i<n;i++){
+        // parallax factors: vertical parallax <1 means star moves less than foreground
+    // vertical parallax (how much the star moves relative to camera)
+    const par = Math.random()*0.3 + 0.10; // ~0.10..0.40
+    // horizontal parallax should be noticeably smaller than vertical
+    const hpar = Math.random()*0.03 + 0.005; // ~0.005..0.035 (subtle)
+        stars.push({
+            // initialize screen positions; these will be adjusted each frame by camera/player deltas
+            screenX: Math.random()*W,
+            screenY: Math.random()*H,
+            parallax: par,
+            hParallax: hpar,
+            size: Math.random()*1.6 + 0.8,
+            // bias stars to be brighter by default
+            baseAlpha: Math.random()*0.5 + 0.45,
+            speed: Math.random()*1.8 + 0.4,
+            phase: Math.random()*Math.PI*2
+        });
+    }
+}
 
 const scoreEl = document.getElementById('score');
 const bestEl = document.getElementById('best');
@@ -87,6 +123,11 @@ function reset() {
     player.vy = 0;
     lastGenY = 0;
     generateInitial();
+    // regenerate stars to match the current canvas and newly setup scene
+    if(typeof generateStars === 'function') generateStars();
+    // initialize tracking for parallax deltas
+    lastCameraY = cameraY;
+    lastPlayerX = player.x;
     running = true;
 }
 
@@ -208,12 +249,34 @@ function updatePlayer(){
 }
 
 function drawStars() {
-    ctx.fillStyle = 'white';
-    for (let i = 0; i < 100; i++) {
-        const x = Math.random() * W;
-        const y = Math.random() * H;
-        ctx.fillRect(x, y, 2, 2);
+    // pulsating persistent stars with parallax relative to camera/player
+    const t = performance.now() / 1000;
+    // move stars by the camera/player deltas since last frame
+    const dy = cameraY - lastCameraY;
+    const dx = player.x - lastPlayerX;
+    for(const s of stars){
+        // apply fractional motion: stars move opposite camera by a fraction (parallax)
+        s.screenY -= dy * s.parallax;
+        s.screenX += dx * s.hParallax;
+
+        // wrap vertically
+        if(s.screenY < -80) s.screenY += H + 160;
+        if(s.screenY > H + 80) s.screenY -= H + 160;
+
+        // wrap horizontally
+        if(s.screenX < -10) s.screenX += W + 20;
+        if(s.screenX > W + 10) s.screenX -= W + 20;
+
+        // pulsate alpha and size
+    // make pulsation subtler and overall brighter
+    const pulse = 0.78 + 0.22 * Math.sin(t * s.speed + s.phase); // 0.56..1.0
+    const alpha = Math.max(0, Math.min(1, s.baseAlpha * 1.05 * pulse));
+        const sz = Math.max(0.5, s.size * (0.8 + 0.4 * Math.sin(t * s.speed + s.phase)));
+        ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(3)})`;
+        ctx.fillRect(s.screenX, s.screenY, sz, sz);
     }
+    lastCameraY = cameraY;
+    lastPlayerX = player.x;
 }
 
 function drawPlayer(){
@@ -331,19 +394,17 @@ function drawGameOver(){
 
 function loop(){
     ctx.clearRect(0,0,W,H);
-    drawBackground();
     if(running){
         updatePlayer();
         extendPlatforms();
         updatePlatforms();
-        drawPlatforms();
-        drawPlayer();
     } else {
         updatePlatforms();
-        drawPlatforms();
-        drawPlayer();
-        drawGameOver();
     }
+    drawBackground();
+    drawPlatforms();
+    drawPlayer();
+    if(!running) drawGameOver();
     requestAnimationFrame(loop);
 }
 
