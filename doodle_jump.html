@@ -7,10 +7,10 @@
 html,body{margin:0;padding:0;overflow:hidden;font-family:Arial,sans-serif;background:#0a1322;color:#fff;}
 body{display:flex;justify-content:center;}
 #stage{position:relative;width:480px;height:100vh;}
-#hud{position:absolute;top:8px;left:8px;z-index:10;font-size:16px;}
-#hud div{margin-bottom:4px;}
-#motionBtn{position:absolute;top:8px;right:8px;z-index:10;padding:6px 10px;background:#444;color:#fff;border:none;border-radius:4px;cursor:pointer;}
-#motionBtn:hover{background:#666;}
+#hud{position:absolute;top:12px;left:12px;z-index:10;}
+#hud div{margin-bottom:6px;padding:8px 12px;background:linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02));border-radius:10px;font-weight:700;font-size:18px;box-shadow:0 6px 18px rgba(0,0,0,0.45);display:inline-block;}
+#best{font-size:13px;opacity:0.95;padding:6px 10px;margin-top:4px;}
+#motionBtn{display:none;}
 canvas{width:100%;height:100%;display:block;}
 </style>
 </head>
@@ -19,15 +19,8 @@ canvas{width:100%;height:100%;display:block;}
     <div id="hud">
         <div id="score">Score: 0</div>
         <div id="best">Best: 0</div>
-        <div id="motionControls" style="margin-top:6px;font-size:13px;">
-            <label style="display:inline-flex;align-items:center;gap:6px;">
-                <input type="checkbox" id="invertMotion"> Invert
-            </label>
-            <button id="calibrateBtn" style="margin-left:8px;padding:4px 8px;font-size:12px;">Calibrate</button>
-            <div id="diag" style="margin-top:6px;font-size:12px;opacity:0.9;line-height:1.2;"></div>
-        </div>
     </div>
-    <button id="motionBtn">Motion Off</button>
+    <!-- motion button removed -->
     <canvas id="gameCanvas"></canvas>
     <audio id="jumpSound" src="assets/jump.mp3"></audio> <!-- Add your sound file -->
     <audio id="gameOverSound" src="assets/game-over.mp3"></audio> <!-- Add your sound file -->
@@ -417,22 +410,7 @@ addEventListener('keydown', e=>{
     if(!running){ reset(); }
 });
 
-// Wire up invert toggle and calibrate button
-const invertEl = document.getElementById('invertMotion');
-if(invertEl){
-    invertEl.addEventListener('change', ()=>{ invertMotion = !!invertEl.checked; });
-}
-const calibBtn = document.getElementById('calibrateBtn');
-if(calibBtn){
-    calibBtn.addEventListener('click', ()=>{
-        // set current tilt (chosen axis) as zero reference for orientation-based control
-        zeroTilt = lastOrientationTilt || 0;
-        // tiny feedback via diag
-        const diagEl = document.getElementById('diag');
-        if(diagEl) diagEl.textContent = 'Calibrated at tilt=' + zeroTilt.toFixed(2) + '°';
-        setTimeout(()=>{ if(diagEl) diagEl.textContent = ''; }, 1200);
-    });
-}
+// ...motion GUI removed
 addEventListener('keyup', e=>{
     if(e.code==='ArrowLeft'||e.code==='KeyA') keys.left = false;
     if(e.code==='ArrowRight'||e.code==='KeyD') keys.right = false;
@@ -571,48 +549,7 @@ function disableMotion(){
     accelX = 0;
 }
 
-// Toggle motion on/off with proper permission flow on iOS
-const motionBtn = document.getElementById('motionBtn');
-async function requestMotionPermission(){
-    // If the permission API is available, request it. Must be called from a user gesture.
-    try{
-        if(typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
-            const r = await DeviceOrientationEvent.requestPermission();
-            if(r === 'granted') return true;
-        }
-    }catch(e){/* ignore */}
-    try{
-        if(typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function'){
-            const r = await DeviceMotionEvent.requestPermission();
-            if(r === 'granted') return true;
-        }
-    }catch(e){/* ignore */}
-    return false;
-}
-
-motionBtn.addEventListener('click', async ()=>{
-    if(!useMotion){
-        // If the browser requires permission, ask for it. If the API isn't present, just enable.
-        const needPermissionAPI = (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') ||
-                                  (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function');
-        if(needPermissionAPI){
-            const granted = await requestMotionPermission();
-            if(!granted){
-                // Permission denied or unavailable — show a hint in diag if possible
-                const diagEl = document.getElementById('diag');
-                if(diagEl) diagEl.textContent = 'Motion permission denied. Check Safari settings.';
-                return;
-            }
-        }
-        useMotion = true;
-        enableMotion();
-        motionBtn.textContent='Motion On';
-    } else {
-        disableMotion();
-        useMotion = false;
-        motionBtn.textContent='Motion Off';
-    }
-});
+// Motion UI controls removed; motion handlers can be enabled programmatically if needed
 
 if(!CanvasRenderingContext2D.prototype.roundRect){
     CanvasRenderingContext2D.prototype.roundRect=function(x,y,w,h,r){
