@@ -4,7 +4,7 @@ Diese Anleitung ist für dieses Repository optimiert und so formuliert, dass auc
 
 ## Projekt-Standard (verbindlich)
 
-- API-Basis: `http://johannes1.local`
+- API-Basis: `http://johannes1.local:5000`
 - Kein QR-Code-Flow für Score-Übertragung verwenden
 - Score-Upload immer über `window.submitGameScore(...)`
 - Pro Spiel muss `data-game` eindeutig sein (z. B. `flappy`, `snake`, `pacman`, `doodle-jump`)
@@ -26,7 +26,7 @@ Wenn ein neues Spiel hinzugefügt wird, diese Schritte in genau dieser Reihenfol
   <p id="gs-status" role="status" aria-live="polite"></p>
   <section
     id="gs-leaderboard"
-    data-api-base="http://johannes1.local"
+    data-api-base="http://johannes1.local:5000"
     data-game="my-game"
     data-limit="10"
     data-refresh-ms="5000"
@@ -116,7 +116,7 @@ Erwartete Endpunkte:
 ## Checkliste für KI-Agenten (Definition of Done)
 
 - Leaderboard-Snippet ist in der Spielseite sichtbar eingebaut.
-- `data-api-base` ist `http://johannes1.local`.
+- `data-api-base` ist `http://johannes1.local:5000`.
 - `data-game` ist korrekt und eindeutig.
 - Script `leaderboard-embed.js` ist eingebunden.
 - Score wird bei Game-Over genau einmal gesendet.
