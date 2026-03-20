@@ -2,29 +2,61 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Jump Space!</title>
 <style>
 html,body{margin:0;padding:0;overflow:hidden;font-family:Arial,sans-serif;background:#0a1322;color:#fff;}
-body{display:flex;justify-content:center;}
-#stage{position:relative;width:480px;height:100vh;}
+body{display:flex;justify-content:center;align-items:flex-start;}
+.page{width:min(1080px,100%);padding:12px;display:flex;gap:16px;align-items:flex-start;justify-content:center;}
+#stage{position:relative;width:480px;height:calc(100vh - 24px);max-height:980px;flex:0 0 auto;}
 #hud{position:absolute;top:12px;left:12px;z-index:10;}
 #hud div{margin-bottom:6px;padding:8px 12px;background:linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02));border-radius:10px;font-weight:700;font-size:18px;box-shadow:0 6px 18px rgba(0,0,0,0.45);display:inline-block;}
 #best{font-size:13px;opacity:0.95;padding:6px 10px;margin-top:4px;}
 #motionBtn{display:none;}
 canvas{width:100%;height:100%;display:block;}
+
+#leaderboard-wrap{width:320px;max-width:38vw;background:linear-gradient(180deg,rgba(13,28,51,0.85),rgba(7,16,33,0.9));border:1px solid rgba(255,255,255,0.14);border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,0.35);padding:12px;}
+#gs-status{margin:0 0 10px;font-size:13px;opacity:.9;min-height:18px;}
+#gs-leaderboard h2{margin:0 0 10px;font-size:20px;letter-spacing:.3px;}
+#gs-leaderboard-list{margin:0;padding-left:22px;display:flex;flex-direction:column;gap:8px;}
+#gs-leaderboard-list li{padding:8px 10px;border-radius:9px;background:rgba(255,255,255,0.06);}
+
+@media (max-width: 980px){
+    html,body{overflow:auto;}
+    .page{flex-direction:column;align-items:center;padding-bottom:20px;}
+    #stage{width:min(480px,100%);height:74vh;}
+    #leaderboard-wrap{width:min(480px,100%);max-width:none;}
+}
 </style>
 </head>
 <body>
-<div id="stage">
-    <div id="hud">
-        <div id="score">Score: 0</div>
-        <div id="best">Best: 0</div>
+<div class="page">
+    <div id="stage">
+        <div id="hud">
+            <div id="score">Score: 0</div>
+            <div id="best">Best: 0</div>
+        </div>
+        <!-- motion button removed -->
+        <canvas id="gameCanvas"></canvas>
+        <audio id="jumpSound" src="assets/jump.mp3"></audio> <!-- Add your sound file -->
+        <audio id="gameOverSound" src="assets/game-over.mp3"></audio> <!-- Add your sound file -->
     </div>
-    <!-- motion button removed -->
-    <canvas id="gameCanvas"></canvas>
-    <audio id="jumpSound" src="assets/jump.mp3"></audio> <!-- Add your sound file -->
-    <audio id="gameOverSound" src="assets/game-over.mp3"></audio> <!-- Add your sound file -->
+
+    <aside id="leaderboard-wrap" aria-label="Leaderboard">
+        <p id="gs-status" role="status" aria-live="polite"></p>
+        <section
+          id="gs-leaderboard"
+                    data-api-base="http://johannes1.local"
+          data-game="doodle-jump"
+          data-limit="10"
+          data-refresh-ms="5000"
+        >
+          <h2>Leaderboard</h2>
+          <ol id="gs-leaderboard-list"></ol>
+        </section>
+    </aside>
 </div>
+<script src="leaderboard-embed.js" defer></script>
 <script>
 window.addEventListener('DOMContentLoaded', () => {
 (()=> {
@@ -82,6 +114,26 @@ const scoreEl = document.getElementById('score');
 const bestEl = document.getElementById('best');
 let best = +localStorage.doodleBest||0;
 bestEl.textContent = 'Best: '+best;
+let didSubmitThisRun = false;
+
+async function submitFinalScore(){
+    if(typeof window.submitGameScore !== 'function' || score <= 0) return;
+    const storedName = localStorage.getItem('doodle_player_name') || '';
+    let playerName = storedName;
+    if(!playerName){
+        const input = prompt('Name für das Leaderboard eingeben:','');
+        if(input === null) return;
+        playerName = input.trim();
+        if(!playerName) return;
+        localStorage.setItem('doodle_player_name', playerName);
+    }
+
+    try{
+        await window.submitGameScore(playerName, score, 'doodle-jump');
+    }catch(_error){
+        // Status wird im Embed behandelt
+    }
+}
 
 const player = {
     x: W/2, y: H-100, w: 40, h: 40,
@@ -122,6 +174,7 @@ function reset() {
     // initialize tracking for parallax deltas
     lastCameraY = cameraY;
     lastPlayerX = player.x;
+    didSubmitThisRun = false;
     running = true;
 }
 
@@ -239,6 +292,10 @@ function updatePlayer(){
         document.getElementById('gameOverSound').play(); // Play game over sound
         if(score > best){ best = score; localStorage.doodleBest = best; }
         bestEl.textContent = 'Best: '+best;
+        if(!didSubmitThisRun){
+            didSubmitThisRun = true;
+            submitFinalScore();
+        }
     }
 }
 

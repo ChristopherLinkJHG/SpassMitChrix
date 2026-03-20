@@ -7,31 +7,83 @@
 <style>
     :root{--bg:#87ceeb;--ground:#DEB887;--pipe:#2E8B57;--text:#fff}
     html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial}
-    canvas{display:block;margin:0 auto;background:linear-gradient(var(--bg),#b3e6ff)}
+    body{background:linear-gradient(180deg,#88d4ff,#d8f2ff);display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box}
+    .page{width:min(1100px,100%);display:flex;gap:16px;align-items:flex-start;justify-content:center}
+    .game-shell{position:relative;flex:0 0 auto}
+    canvas{display:block;margin:0;background:linear-gradient(var(--bg),#b3e6ff);border-radius:10px;box-shadow:0 10px 26px rgba(0,0,0,.25)}
     .overlay{
-        position:fixed;left:0;top:0;right:0;bottom:0;display:flex;
+        position:absolute;left:0;top:0;right:0;bottom:0;display:flex;
         align-items:center;justify-content:center;pointer-events:none;
         color:var(--text);text-shadow:0 2px 4px rgba(0,0,0,.4);font-weight:700}
     .panel{background:rgba(0,0,0,.35);padding:18px 26px;border-radius:10px;pointer-events:auto}
     .hint{font-weight:600;font-size:14px;opacity:.95}
-    .score{position:fixed;left:12px;top:12px;color:#222;background:#fff8;padding:8px 10px;border-radius:8px;font-weight:700}
+    .score{position:absolute;left:12px;top:12px;color:#222;background:#fff8;padding:8px 10px;border-radius:8px;font-weight:700;z-index:20}
+
+    #leaderboard-wrap{width:320px;max-width:38vw;background:rgba(13,24,37,.85);border:1px solid rgba(255,255,255,.26);border-radius:14px;box-shadow:0 10px 24px rgba(0,0,0,.24);padding:12px;color:#eaf4ff}
+    #gs-status{margin:0 0 10px;font-size:13px;opacity:.92;min-height:18px}
+    #gs-leaderboard h2{margin:0 0 10px;font-size:20px;letter-spacing:.3px}
+    #gs-leaderboard-list{margin:0;padding-left:22px;display:flex;flex-direction:column;gap:8px}
+    #gs-leaderboard-list li{padding:8px 10px;border-radius:9px;background:rgba(255,255,255,.1)}
+
+    @media (max-width:980px){
+        body{padding:8px}
+        .page{flex-direction:column;align-items:center}
+        #leaderboard-wrap{width:min(520px,100%);max-width:none}
+    }
 </style>
 </head>
 <body>
-<canvas id="c"></canvas>
-<div class="overlay" id="overlay">
-    <div class="panel" id="panel">
-        <div style="font-size:22px;margin-bottom:6px">Flappy Bird — Click / Space to flap</div>
-        <div class="hint" id="hint">Click or press Space to start</div>
-
-        <!-- QR container (hidden until game over) -->
-        <div id="qrContainer" style="margin-top:12px;display:none;text-align:center">
-            <div style="font-size:12px;margin-bottom:6px;color:#fff8">Zeige diesen QR-Code an jemanden von dem P-Seminar!</div>
-            <img id="qr" alt="QR code" style="width:160px;height:160px;border-radius:8px;background:#fff;padding:6px" />
+<main class="page">
+    <div class="game-shell">
+        <canvas id="c"></canvas>
+        <div class="overlay" id="overlay">
+            <div class="panel" id="panel">
+                <div style="font-size:22px;margin-bottom:6px">Flappy Bird — Click / Space to flap</div>
+                <div class="hint" id="hint">Click or press Space to start</div>
+            </div>
         </div>
+        <div class="score" id="score" style="display:none">0</div>
     </div>
-</div>
-<div class="score" id="score" style="display:none">0</div>
+
+    <aside id="leaderboard-wrap" aria-label="Leaderboard">
+        <p id="gs-status" role="status" aria-live="polite"></p>
+        <section
+          id="gs-leaderboard"
+                    data-api-base="http://johannes1.local"
+          data-game="flappy"
+          data-limit="10"
+          data-refresh-ms="5000"
+        >
+          <h2>Leaderboard</h2>
+          <ol id="gs-leaderboard-list"></ol>
+        </section>
+    </aside>
+</main>
+<script src="leaderboard-embed.js" defer></script>
+
+<script>
+(() => {
+    let didSubmitThisRun = false;
+    async function submitFinalScore(playerName, score) {
+        if (typeof window.submitGameScore !== 'function' || !playerName || score <= 0) return;
+        try {
+            await window.submitGameScore(playerName, score, 'flappy');
+        } catch (_error) {
+            // Fehleranzeige übernimmt das Embed
+        }
+    }
+
+    window.__flappySubmitScore = function(playerName, score){
+        if (didSubmitThisRun) return;
+        didSubmitThisRun = true;
+        submitFinalScore(playerName, score);
+    };
+
+    window.__flappyResetSubmit = function(){
+        didSubmitThisRun = false;
+    };
+})();
+</script>
 
 <script>
 (() => {
@@ -41,8 +93,6 @@
     const panel = document.getElementById('panel');
     const hint = document.getElementById('hint');
     const scoreEl = document.getElementById('score');
-    const qrContainer = document.getElementById('qrContainer');
-    const qrImg = document.getElementById('qr');
 
     let W = 480, H = 640;
     const DPR = Math.min(window.devicePixelRatio || 1, 2);
@@ -79,13 +129,13 @@
     let score = 0;
     let best = Number(localStorage.getItem('flappy_best')||0);
 
-    // Player name for QR (persisted)
+    // Player name for leaderboard (persisted)
     let playerName = localStorage.getItem('flappy_player') || '';
 
     function askName() {
         // ask once if no stored name
         if (!playerName) {
-            const n = prompt('Enter your name for the QR code (optional):', '');
+            const n = prompt('Name für das Leaderboard eingeben (optional):', '');
             if (n !== null) playerName = n.trim();
             if (!playerName) playerName = '';
             localStorage.setItem('flappy_player', playerName);
@@ -104,8 +154,9 @@
         hint.textContent = 'Click or press Space to start';
         panel.querySelector('div').textContent = 'Flappy Bird — Click / Space to flap';
         lastTime = 0;
-        // hide QR on reset
-        qrContainer.style.display = 'none';
+        if (typeof window.__flappyResetSubmit === 'function') {
+            window.__flappyResetSubmit();
+        }
     }
 
     function start() {
@@ -184,14 +235,12 @@
         panel.querySelector('div').textContent = 'Game Over — Score: ' + score + '  Best: ' + best;
         hint.textContent = 'Click or press Space to retry';
 
-        // ensure we asked name before generating QR
+        // ensure we asked name before score submit
         askName();
 
-        // build payload and QR URL (JSON with name, score, game)
-        const payload = JSON.stringify({name: playerName, score: score, game: 'flappy'});
-        const qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=' + encodeURIComponent(payload);
-        qrImg.src = qrUrl;
-        qrContainer.style.display = 'block';
+        if (typeof window.__flappySubmitScore === 'function') {
+            window.__flappySubmitScore(playerName, score);
+        }
     }
 
     function draw() {
@@ -293,4 +342,3 @@
 </script>
 </body>
 </html>
-<!-- ...existing code... -->
