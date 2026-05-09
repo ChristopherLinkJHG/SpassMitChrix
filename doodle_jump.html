@@ -12,6 +12,20 @@ body{display:flex;justify-content:center;}
 #best{font-size:13px;opacity:0.95;padding:6px 10px;margin-top:4px;}
 #motionBtn{display:none;}
 canvas{width:100%;height:100%;display:block;}
+button{font-family:inherit;}
+.overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(5,10,20,0.6);z-index:20;}
+.overlay.hidden{display:none;}
+.overlay-card{width:min(360px,90%);background:rgba(12,18,32,0.95);border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:18px 18px 16px;box-shadow:0 18px 40px rgba(0,0,0,0.55);text-align:left;}
+.overlay-title{font-size:18px;font-weight:700;margin-bottom:10px;}
+.overlay-row{display:flex;flex-direction:column;gap:6px;margin-bottom:12px;font-size:13px;}
+.overlay-row input{padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);background:#0f1a30;color:#fff;outline:none;}
+.overlay-row input:focus{border-color:#7ad4ff;box-shadow:0 0 0 2px rgba(122,212,255,0.2);}
+.overlay-actions{display:flex;gap:10px;}
+.overlay-actions button{flex:1;padding:10px 12px;border-radius:10px;border:none;cursor:pointer;background:#46b9ff;color:#06111d;font-weight:700;}
+.overlay-actions button.ghost{background:transparent;border:1px solid rgba(255,255,255,0.25);color:#fff;}
+.overlay-actions button:disabled{opacity:0.6;cursor:not-allowed;}
+.overlay-status{margin-top:10px;min-height:18px;font-size:12px;color:#bfe9ff;}
+.overlay-status.error{color:#ffb3b3;}
 </style>
 </head>
 <body>
@@ -20,12 +34,77 @@ canvas{width:100%;height:100%;display:block;}
         <div id="score">Score: 0</div>
         <div id="best">Best: 0</div>
     </div>
+    <div id="scoreSubmitOverlay" class="overlay hidden" aria-hidden="true">
+        <div class="overlay-card" role="dialog" aria-labelledby="submitTitle">
+            <div id="submitTitle" class="overlay-title">Submit your score?</div>
+            <div class="overlay-row">
+                <label for="playerNameInput">Name</label>
+                <input id="playerNameInput" type="text" maxlength="20" autocomplete="off" inputmode="text" placeholder="Your name" />
+            </div>
+            <div class="overlay-actions">
+                <button id="submitScoreBtn" type="button">Submit</button>
+                <button id="skipScoreBtn" type="button" class="ghost">Skip</button>
+            </div>
+            <div id="submitStatus" class="overlay-status" role="status" aria-live="polite"></div>
+        </div>
+    </div>
     <!-- motion button removed -->
     <canvas id="gameCanvas"></canvas>
     <audio id="jumpSound" src="assets/jump.mp3"></audio> <!-- Add your sound file -->
     <audio id="gameOverSound" src="assets/game-over.mp3"></audio> <!-- Add your sound file -->
 </div>
 <script>
+const API_URL = "http://localhost:5000/api/scores";
+const SERVER_CHECK_TIMEOUT_MS = 1500;
+
+async function submitScores(game, score, name) {
+    if (typeof game !== "string" || game.trim() === "") {
+        throw new TypeError("game must be a non-empty string");
+    }
+
+    if (typeof name !== "string" || name.trim() === "") {
+        throw new TypeError("name must be a non-empty string");
+    }
+
+    let normalizedScore = score;
+    if (typeof normalizedScore === "string" && normalizedScore.trim() !== "") {
+        normalizedScore = Number(normalizedScore);
+    }
+
+    if (
+        typeof normalizedScore !== "number" ||
+        !Number.isFinite(normalizedScore)
+    ) {
+        throw new TypeError("score must be a finite number");
+    }
+
+    const response = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            playerName: name.trim(),
+            game: game.trim(),
+            score: normalizedScore,
+        }),
+    });
+
+    if (!response.ok) {
+        let message = "";
+        try {
+            const data = await response.json();
+            if (data && typeof data.error === "string") {
+                message = data.error;
+            }
+        } catch (err) {
+            // Ignore JSON parse errors and fall back to a generic message.
+        }
+
+        throw new Error(message || `Request failed with status ${response.status}`);
+    }
+
+    return response.json();
+}
+
 window.addEventListener('DOMContentLoaded', () => {
 (()=> {
 const canvas = document.getElementById('gameCanvas');
@@ -80,6 +159,11 @@ function generateStars(count){
 
 const scoreEl = document.getElementById('score');
 const bestEl = document.getElementById('best');
+const overlayEl = document.getElementById('scoreSubmitOverlay');
+const nameInputEl = document.getElementById('playerNameInput');
+const submitBtnEl = document.getElementById('submitScoreBtn');
+const skipBtnEl = document.getElementById('skipScoreBtn');
+const statusEl = document.getElementById('submitStatus');
 let best = +localStorage.doodleBest||0;
 bestEl.textContent = 'Best: '+best;
 
@@ -106,6 +190,67 @@ let invertMotion = false;
 let zeroTilt = 0; // calibration offset (degrees)
 let lastOrientationGamma = 0; // legacy: last gamma
 let lastOrientationTilt = 0; // latest chosen tilt axis (gamma or beta) for calibrate
+let awaitingGameOverAction = false;
+let cachedPlayerName = '';
+let isSubmittingScore = false;
+let serverCheckToken = 0;
+
+function setOverlayStatus(message, isError){
+    statusEl.textContent = message;
+    statusEl.classList.toggle('error', Boolean(isError));
+}
+
+function setSubmitBusy(isBusy){
+    isSubmittingScore = isBusy;
+    submitBtnEl.disabled = isBusy;
+    skipBtnEl.disabled = isBusy;
+    nameInputEl.disabled = isBusy;
+}
+
+function showGameOverOverlay(){
+    if(cachedPlayerName){
+        nameInputEl.value = cachedPlayerName;
+    }
+    setOverlayStatus('', false);
+    overlayEl.classList.remove('hidden');
+    overlayEl.setAttribute('aria-hidden', 'false');
+    nameInputEl.focus();
+}
+
+function hideGameOverOverlay(){
+    overlayEl.classList.add('hidden');
+    overlayEl.setAttribute('aria-hidden', 'true');
+}
+
+async function isServerAvailable(){
+    const controller = new AbortController();
+    const timeoutId = setTimeout(()=>controller.abort(), SERVER_CHECK_TIMEOUT_MS);
+    try{
+        const response = await fetch(`${API_URL}?limit=1`, {
+            method: 'GET',
+            signal: controller.signal
+        });
+        return response.ok;
+    } catch (err){
+        return false;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+async function checkServerThenMaybeShowOverlay(token){
+    const ok = await isServerAvailable();
+    if(token !== serverCheckToken || running){
+        return;
+    }
+    if(!ok){
+        console.warn('Score server not responding; skipping submission overlay.');
+        awaitingGameOverAction = false;
+        return;
+    }
+    awaitingGameOverAction = true;
+    showGameOverOverlay();
+}
 
 function reset() {
     platforms = [];
@@ -123,6 +268,10 @@ function reset() {
     lastCameraY = cameraY;
     lastPlayerX = player.x;
     running = true;
+    awaitingGameOverAction = false;
+    serverCheckToken += 1;
+    setSubmitBusy(false);
+    hideGameOverOverlay();
 }
 
 function rand(min,max){return Math.random()*(max-min)+min;}
@@ -235,10 +384,15 @@ function updatePlayer(){
     }
 
     if(player.y - cameraY > H + 150){
-        running = false;
-        document.getElementById('gameOverSound').play(); // Play game over sound
-        if(score > best){ best = score; localStorage.doodleBest = best; }
-        bestEl.textContent = 'Best: '+best;
+        if(running){
+            running = false;
+            document.getElementById('gameOverSound').play(); // Play game over sound
+            if(score > best){ best = score; localStorage.doodleBest = best; }
+            bestEl.textContent = 'Best: '+best;
+            serverCheckToken += 1;
+            const token = serverCheckToken;
+            checkServerThenMaybeShowOverlay(token);
+        }
     }
 }
 
@@ -383,7 +537,11 @@ function drawGameOver(){
     ctx.font='22px Arial';
     ctx.fillText('Score: '+score+'   Best: '+best, W/2, H/2);
     ctx.font='16px Arial';
-    ctx.fillText('Press Space / Click / Tap to Restart', W/2, H/2 + 40);
+    if(awaitingGameOverAction){
+        ctx.fillText('Submit or Skip below to restart', W/2, H/2 + 40);
+    } else {
+        ctx.fillText('Press Space / Click / Tap to Restart', W/2, H/2 + 40);
+    }
 }
 
 function loop(){
@@ -407,7 +565,7 @@ let activePointerId = null; // track active touch/pointer for touch controls
 addEventListener('keydown', e=>{
     if(e.code==='ArrowLeft'||e.code==='KeyA') keys.left = true;
     if(e.code==='ArrowRight'||e.code==='KeyD') keys.right = true;
-    if(!running){ reset(); }
+    if(!running && !awaitingGameOverAction){ reset(); }
 });
 
 // ...motion GUI removed
@@ -421,7 +579,7 @@ canvas.addEventListener('pointerdown', (e) => {
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     // if game not running, any pointer down restarts
-    if(!running){ reset(); return; }
+    if(!running){ if(!awaitingGameOverAction){ reset(); } return; }
 
     // start directional movement depending on half
     if(x < rect.width/2){ keys.left = true; keys.right = false; }
@@ -448,6 +606,48 @@ function releasePointer(id){
 
 canvas.addEventListener('pointerup', (e) => { releasePointer(e.pointerId); try{ canvas.releasePointerCapture(e.pointerId); }catch(e){} });
 canvas.addEventListener('pointercancel', (e) => { releasePointer(e.pointerId); });
+
+async function handleSubmitScore(){
+    if(!awaitingGameOverAction || isSubmittingScore){
+        return;
+    }
+    const name = nameInputEl.value.trim();
+    if(!name){
+        setOverlayStatus('Enter a name to submit.', true);
+        nameInputEl.focus();
+        return;
+    }
+    setSubmitBusy(true);
+    setOverlayStatus('Submitting...', false);
+    try{
+        await submitScores('Doodle Jump', score, name);
+        cachedPlayerName = name;
+        awaitingGameOverAction = false;
+        hideGameOverOverlay();
+    } catch (err){
+        const message = err && err.message ? err.message : 'Submission failed.';
+        setOverlayStatus(message, true);
+    } finally {
+        setSubmitBusy(false);
+    }
+}
+
+function handleSkipScore(){
+    if(isSubmittingScore){
+        return;
+    }
+    awaitingGameOverAction = false;
+    hideGameOverOverlay();
+    reset();
+}
+
+submitBtnEl.addEventListener('click', handleSubmitScore);
+skipBtnEl.addEventListener('click', handleSkipScore);
+nameInputEl.addEventListener('keydown', (e)=>{
+    if(e.key === 'Enter'){
+        handleSubmitScore();
+    }
+});
 
 function enableMotion(){
     if(motionHandler || orientationHandler) return;
