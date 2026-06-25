@@ -6,7 +6,7 @@
 <style>
 html,body{margin:0;padding:0;overflow:hidden;font-family:Arial,sans-serif;background:#0a1322;color:#fff;touch-action:none;}
 body{display:flex;justify-content:center;}
-#stage{position:relative;width:480px;height:100vh;user-select:none;-webkit-user-select:none;touch-action:none;}
+#stage{position:relative;width:480px;height:100vh;height:100svh;height:100dvh;user-select:none;-webkit-user-select:none;touch-action:none;}
 #hud{position:absolute;top:12px;left:12px;z-index:10;}
 #hud div{margin-bottom:6px;padding:8px 12px;background:linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02));border-radius:10px;font-weight:700;font-size:18px;box-shadow:0 6px 18px rgba(0,0,0,0.45);display:inline-block;}
 #best{font-size:13px;opacity:0.95;padding:6px 10px;margin-top:4px;}
@@ -22,8 +22,8 @@ canvas{width:100%;height:100%;display:block;touch-action:none;}
     </div>
     <!-- motion button removed -->
     <canvas id="gameCanvas"></canvas>
-    <audio id="jumpSound" src="assets/jump.mp3"></audio> <!-- Add your sound file -->
-    <audio id="gameOverSound" src="assets/game-over.mp3"></audio> <!-- Add your sound file -->
+    <audio id="jumpSound" src="assets/jump.mp3" preload="auto"></audio> <!-- Add your sound file -->
+    <audio id="gameOverSound" src="assets/game-over.mp3" preload="auto"></audio> <!-- Add your sound file -->
 </div>
 <script type="module">
 import { submitScores } from "../submitScores.js";
@@ -32,11 +32,36 @@ window.addEventListener('DOMContentLoaded', () => {
 (()=> {
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
+const jumpSound = document.getElementById('jumpSound');
+const gameOverSound = document.getElementById('gameOverSound');
+const jumpSounds = [jumpSound];
+for(let i=0;i<3;i++){
+    const sound = jumpSound.cloneNode();
+    sound.preload = 'auto';
+    jumpSounds.push(sound);
+}
+let nextJumpSound = 0;
+
+function playSound(sound){
+    if(!sound) return;
+    try { sound.currentTime = 0; } catch(e){}
+    sound.play().catch(()=>{});
+}
+
+function playJumpSound(){
+    const sound = jumpSounds[nextJumpSound];
+    nextJumpSound = (nextJumpSound + 1) % jumpSounds.length;
+    playSound(sound);
+}
+
+jumpSounds.forEach(sound => sound.load());
+gameOverSound.load();
 
 function setSize(){
     const rect = canvas.getBoundingClientRect();
+    const viewportHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
     canvas.width = rect.width;
-    canvas.height = rect.height;
+    canvas.height = Math.min(rect.height, viewportHeight);
     W = canvas.width;
     H = canvas.height;
     // regenerate stars so they match the new canvas size
@@ -46,6 +71,7 @@ function setSize(){
 let W=0,H=0;
 setSize();
 addEventListener('resize', setSize);
+if(window.visualViewport) window.visualViewport.addEventListener('resize', setSize);
 
 // persistent star field (pulsating)
 let stars = [];
@@ -96,11 +122,14 @@ const player = {
 
 let platforms = [];
 let cameraY = 0;
+let targetCameraY = 0;
 let score = 0;
 let running = true;
 let accelX = 0;
 let useMotion = false;
 let lastGenY = 0;
+let platformCleanupTicks = 0;
+let lastJumpPlatformY = 0;
 let motionHandler = null;
 let orientationHandler = null;
 let screenAngle = 0; // current screen orientation angle (deg)
@@ -112,6 +141,7 @@ let lastOrientationTilt = 0; // latest chosen tilt axis (gamma or beta) for cali
 function reset() {
     platforms = [];
     cameraY = 0;
+    targetCameraY = 0;
     score = 0;
     player.x = W/2;
     player.y = H-120;
@@ -131,16 +161,23 @@ function rand(min,max){return Math.random()*(max-min)+min;}
 
 function chooseType(){
     const s = score;
-    let types = ['normal'];
-    if(s > 150) types.push('moving');
-    if(s > 300) types.push('bounce');
-    if(s > 500) types.push('disappear');
-    const weights = { normal:1, moving:0.35, bounce:0.25, disappear:0.18 };
-    let pool = [];
-    types.forEach(t => {
-        for(let i=0;i<weights[t]*10;i++) pool.push(t);
-    });
-    return pool[Math.floor(Math.random()*pool.length)];
+    let total = 1;
+    if(s > 150) total += 0.35;
+    if(s > 300) total += 0.25;
+    if(s > 500) total += 0.18;
+
+    let roll = Math.random() * total;
+    if(roll < 1) return 'normal';
+    roll -= 1;
+    if(s > 150){
+        if(roll < 0.35) return 'moving';
+        roll -= 0.35;
+    }
+    if(s > 300){
+        if(roll < 0.25) return 'bounce';
+        roll -= 0.25;
+    }
+    return 'disappear';
 }
 
 function generatePlatform(y){
@@ -158,28 +195,71 @@ function generatePlatform(y){
     platforms.push(p);
 }
 
-function generateInitial(){
-    for(let y = H; y > -4000; y -= 90){
-        generatePlatform(y);
+function getPlatformGap(){
+    const difficulty = Math.min(score / 1000, 1);
+    const minGap = 80 + difficulty * 30;
+    const maxGap = 110 + difficulty * 45;
+    return rand(minGap, maxGap);
+}
+
+function getStartPlatformScreenY(){
+    return Math.min(Math.max(H - 130, 140), H - 72);
+}
+
+function keepLastJumpPlatformVisible(){
+    const lowestVisibleCameraY = lastJumpPlatformY - (H - 64);
+    if(targetCameraY < lowestVisibleCameraY){
+        targetCameraY = lowestVisibleCameraY;
     }
+}
+
+function smoothCamera(){
+    cameraY += (targetCameraY - cameraY) * 0.18;
+    if(Math.abs(targetCameraY - cameraY) < 0.05){
+        cameraY = targetCameraY;
+    }
+}
+
+function generateInitial(){
     const spWidth = 160;
+    const startY = player.y + player.h + 8;
+    targetCameraY = startY - getStartPlatformScreenY();
+    cameraY = targetCameraY;
+    lastJumpPlatformY = startY;
     platforms.push({
         x: player.x - spWidth/2,
-        y: player.y + player.h + 8,
+        y: startY,
         width: spWidth,
         height: 22,
         type: 'start',
         used:false,vx:0,life:999
     });
-    lastGenY = -4000;
+
+    let y = startY - getPlatformGap();
+    while(y > targetCameraY - 6000){
+        generatePlatform(y);
+        y -= getPlatformGap();
+    }
+    lastGenY = y;
+    platformCleanupTicks = 0;
 }
 
 function extendPlatforms(){
-    while(lastGenY > cameraY - 6000){
-        lastGenY -= 90;
+    while(lastGenY > targetCameraY - 6000){
+        lastGenY -= getPlatformGap();
         generatePlatform(lastGenY);
     }
-    platforms = platforms.filter(p => (p.y - cameraY < H + 120) && (p.type!=='disappear' || !p.used || p.life>0));
+}
+
+function cleanupPlatforms(){
+    let writeIndex = 0;
+    for(let readIndex=0; readIndex<platforms.length; readIndex++){
+        const p = platforms[readIndex];
+        if((p.y - targetCameraY < H + 120) && (p.type!=='disappear' || !p.used || p.life>0)){
+            platforms[writeIndex++] = p;
+        }
+    }
+    platforms.length = writeIndex;
 }
 
 function updatePlatforms(){
@@ -211,6 +291,7 @@ function updatePlayer(){
 
     if(player.vy > 0){
         for(const p of platforms){
+            if(p.y > lastJumpPlatformY + 2) continue;
             if(
                 player.x + player.w > p.x &&
                 player.x < p.x + p.width &&
@@ -221,25 +302,28 @@ function updatePlayer(){
                     player.vy = p.bounceBoost;
                 } else {
                     player.vy = player.jumpVel;
-                    document.getElementById('jumpSound').play(); // Play jump sound
+                    playJumpSound(); // Play jump sound
                 }
                 if(p.type==='disappear'){
                     p.used = true;
                 }
+                lastJumpPlatformY = p.y;
                 score = Math.max(score, Math.floor(-(player.y - H + 120)/10));
                 scoreEl.textContent = 'Score: '+score;
+                break;
             }
         }
     }
 
-    if(player.y < cameraY + H/2){
-        cameraY = player.y - H/2;
+    if(player.y < targetCameraY + H/2){
+        targetCameraY = player.y - H/2;
     }
+    keepLastJumpPlatformVisible();
 
     if(player.y - cameraY > H + 150){
         if(running){
             running = false;
-            document.getElementById('gameOverSound').play(); // Play game over sound
+            playSound(gameOverSound); // Play game over sound
             if(score > best){ best = score; localStorage.doodleBest = best; }
             bestEl.textContent = 'Best: '+best;
             submitScores('Doodle Jump', score).catch((err) => {
@@ -396,6 +480,7 @@ function drawGameOver(){
 const TICK_RATE = 90;
 const TICK_MS = 1000 / TICK_RATE;
 const MAX_FRAME_MS = 250;
+const MAX_TICKS_PER_FRAME = 5;
 let lastFrameTime = null;
 let tickAccumulator = 0;
 
@@ -406,6 +491,12 @@ function tickGame(){
         updatePlatforms();
     } else {
         updatePlatforms();
+    }
+    smoothCamera();
+    platformCleanupTicks += 1;
+    if(platformCleanupTicks >= 15){
+        cleanupPlatforms();
+        platformCleanupTicks = 0;
     }
 }
 
@@ -424,10 +515,13 @@ function loop(timestamp){
     lastFrameTime = timestamp;
     tickAccumulator += frameMs;
 
-    while(tickAccumulator >= TICK_MS){
+    let ticksThisFrame = 0;
+    while(tickAccumulator >= TICK_MS && ticksThisFrame < MAX_TICKS_PER_FRAME){
         tickGame();
         tickAccumulator -= TICK_MS;
+        ticksThisFrame += 1;
     }
+    if(tickAccumulator >= TICK_MS) tickAccumulator = 0;
 
     renderGame();
     requestAnimationFrame(loop);
