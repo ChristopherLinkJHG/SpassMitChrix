@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <title>Jump Space!</title>
 <style>
-html,body{margin:0;padding:0;overflow:hidden;font-family:Arial,sans-serif;background:#0a1322;color:#fff;}
+html,body{margin:0;padding:0;overflow:hidden;font-family:Arial,sans-serif;background:#0a1322;color:#fff;touch-action:none;}
 body{display:flex;justify-content:center;}
-#stage{position:relative;width:480px;height:100vh;user-select:none;-webkit-user-select:none;}
+#stage{position:relative;width:480px;height:100vh;user-select:none;-webkit-user-select:none;touch-action:none;}
 #hud{position:absolute;top:12px;left:12px;z-index:10;}
 #hud div{margin-bottom:6px;padding:8px 12px;background:linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02));border-radius:10px;font-weight:700;font-size:18px;box-shadow:0 6px 18px rgba(0,0,0,0.45);display:inline-block;}
 #best{font-size:13px;opacity:0.95;padding:6px 10px;margin-top:4px;}
@@ -393,8 +393,13 @@ function drawGameOver(){
     ctx.fillText('Press Space / Click / Tap to Restart', W/2, H/2 + 40);
 }
 
-function loop(){
-    ctx.clearRect(0,0,W,H);
+const TICK_RATE = 90;
+const TICK_MS = 1000 / TICK_RATE;
+const MAX_FRAME_MS = 250;
+let lastFrameTime = null;
+let tickAccumulator = 0;
+
+function tickGame(){
     if(running){
         updatePlayer();
         extendPlatforms();
@@ -402,10 +407,29 @@ function loop(){
     } else {
         updatePlatforms();
     }
+}
+
+function renderGame(){
+    ctx.clearRect(0,0,W,H);
     drawBackground();
     drawPlatforms();
     drawPlayer();
     if(!running) drawGameOver();
+}
+
+function loop(timestamp){
+    if(lastFrameTime === null) lastFrameTime = timestamp;
+
+    const frameMs = Math.min(timestamp - lastFrameTime, MAX_FRAME_MS);
+    lastFrameTime = timestamp;
+    tickAccumulator += frameMs;
+
+    while(tickAccumulator >= TICK_MS){
+        tickGame();
+        tickAccumulator -= TICK_MS;
+    }
+
+    renderGame();
     requestAnimationFrame(loop);
 }
 
@@ -423,28 +447,25 @@ addEventListener('keyup', e=>{
     if(e.code==='ArrowRight'||e.code==='KeyD') keys.right = false;
 });
 
-// Touch / pointer controls: touch left/right half to move; tap when game over to restart
-canvas.addEventListener('pointerdown', (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
+function steerFromPointer(e){
+    if(e.clientX < window.innerWidth / 2){ keys.left = true; keys.right = false; }
+    else { keys.right = true; keys.left = false; }
+}
+
+// Touch / pointer controls: touch left/right half of the page to move; tap when game over to restart
+window.addEventListener('pointerdown', (e) => {
     // if game not running, any pointer down restarts
     if(!running){ reset(); return; }
 
     // start directional movement depending on half
-    if(x < rect.width/2){ keys.left = true; keys.right = false; }
-    else { keys.right = true; keys.left = false; }
-
+    steerFromPointer(e);
     activePointerId = e.pointerId;
-    try { canvas.setPointerCapture(e.pointerId); } catch(e){ /* ignore */ }
 });
 
-canvas.addEventListener('pointermove', (e) => {
+window.addEventListener('pointermove', (e) => {
     if(activePointerId === null || e.pointerId !== activePointerId) return;
     if(!running) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    if(x < rect.width/2){ keys.left = true; keys.right = false; }
-    else { keys.right = true; keys.left = false; }
+    steerFromPointer(e);
 });
 
 function releasePointer(id){
@@ -453,8 +474,8 @@ function releasePointer(id){
     activePointerId = null;
 }
 
-canvas.addEventListener('pointerup', (e) => { releasePointer(e.pointerId); try{ canvas.releasePointerCapture(e.pointerId); }catch(e){} });
-canvas.addEventListener('pointercancel', (e) => { releasePointer(e.pointerId); });
+window.addEventListener('pointerup', (e) => { releasePointer(e.pointerId); });
+window.addEventListener('pointercancel', (e) => { releasePointer(e.pointerId); });
 
 function enableMotion(){
     if(motionHandler || orientationHandler) return;
@@ -578,7 +599,7 @@ if(!CanvasRenderingContext2D.prototype.roundRect){
 }
 
 reset();
-loop();
+requestAnimationFrame(loop);
 })();
 });
 </script>
